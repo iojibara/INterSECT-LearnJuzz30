@@ -185,6 +185,31 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 5rem;}
 #ayahtjmodal.open{display:flex;}
 .atj-btn{display:flex;align-items:center;gap:5px;padding:.32rem .8rem;border-radius:20px;border:1px solid var(--gold);background:transparent;color:var(--gold2);font-size:.75rem;cursor:pointer;transition:all .13s;font-family:'Georgia',serif;}
 .atj-btn:hover{background:var(--gold);color:#0d1a10;}
+
+.arecord-btn{display:flex;align-items:center;gap:5px;padding:.32rem .8rem;border-radius:20px;border:1px solid var(--red);background:transparent;color:#e08070;font-size:.75rem;cursor:pointer;transition:all .13s;font-family:'Georgia',serif;}
+.arecord-btn:hover{background:var(--red);color:#fff;}
+
+#rrmodal{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:500;display:none;align-items:flex-start;justify-content:center;padding:2rem 1rem;overflow-y:auto;}
+#rrmodal.open{display:flex;}
+.rr-disclaimer{background:var(--sur2);border:1px solid var(--brd);border-radius:8px;padding:.7rem .9rem;font-size:.82rem;color:var(--muted);line-height:1.5;margin-bottom:1rem;}
+.rr-record-row{display:flex;flex-direction:column;align-items:center;gap:.6rem;padding:.6rem 0 1rem;}
+.rr-record-btn{padding:.8rem 1.6rem;border-radius:50px;border:2px solid var(--red);background:transparent;color:#e08070;font-size:1rem;cursor:pointer;transition:all .15s;font-family:'Georgia',serif;}
+.rr-record-btn:hover{background:var(--red);color:#fff;}
+.rr-record-btn.recording{background:var(--red);color:#fff;animation:recpulse 1s infinite;}
+@keyframes recpulse{0%,100%{opacity:1;}50%{opacity:.5;}}
+.rr-status{color:var(--muted);font-size:.85rem;text-align:center;min-height:1.2em;}
+.rr-playback-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:.6rem;padding:.4rem 0 1rem;}
+.rr-playback-row audio{max-width:220px;height:32px;}
+.rr-score-badge{display:flex;flex-direction:column;align-items:center;justify-content:center;border:2px solid;border-radius:14px;padding:1rem;margin:0 auto 1rem;width:170px;}
+.rr-score-num{font-size:2.4rem;font-weight:800;line-height:1;}
+.rr-score-label{font-size:.7rem;letter-spacing:.05em;margin-top:.3rem;text-transform:uppercase;text-align:center;}
+.rr-canvas{width:100%;max-width:600px;height:140px;display:block;margin:0 auto;background:var(--sur2);border:1px solid var(--brd);border-radius:8px;}
+.rr-legend{text-align:center;font-size:.78rem;color:var(--muted);margin:.5rem 0 1rem;}
+.rr-rule-summary{display:flex;flex-wrap:wrap;justify-content:center;gap:.5rem;margin:0 0 1rem;}
+.rr-rule-pill{border:1.5px solid;border-radius:20px;padding:.25rem .8rem;font-size:.78rem;font-weight:600;text-transform:capitalize;}
+.rr-table{width:100%;border-collapse:collapse;font-size:.85rem;}
+.rr-table th,.rr-table td{padding:.4rem .6rem;text-align:center;border-bottom:1px solid var(--brd);}
+.rr-table th{color:var(--gold3);font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;}
 .tjm-box{background:var(--sur);border:1px solid var(--brd2);border-radius:14px;max-width:900px;width:100%;max-height:90vh;overflow-y:auto;padding:1.5rem;}
 .tjm-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;border-bottom:1px solid var(--brd);padding-bottom:.75rem;}
 .tjm-head h2{font-size:1.3rem;font-weight:normal;color:var(--gold3);}
@@ -282,6 +307,17 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 5rem;}
       <button class="tjm-close" onclick="closeAyahTJ()">✕</button>
     </div>
     <div id="atjm-content"></div>
+  </div>
+</div>
+
+<!-- RECORD & RATE MODAL -->
+<div id="rrmodal">
+  <div class="tjm-box" style="max-width:640px">
+    <div class="tjm-head">
+      <h2 id="rrm-title">Record &amp; Rate</h2>
+      <button class="tjm-close" onclick="closeRR()">✕</button>
+    </div>
+    <div id="rrm-content"></div>
   </div>
 </div>
 
@@ -637,6 +673,7 @@ function buildAyahCards(s){
         <div class="anum">${a.n}</div>
         <div class="atj-badges">${tjBadges}</div>
         <div class="abtns">
+          <button class="arecord-btn" onclick="openRR(${s.id},${a.n})" title="Record your recitation and compare it to Al-Hussary">🎙️ Record & Rate</button>
           <button class="abplay" data-url="${url}" data-id="${s.id}_${a.n}" onclick="playAudio(this,'${url}','${s.id}_${a.n}')">▶ Play</button>
           <button class="atj-btn" onclick="openAyahTJ(${s.id},${a.n})" title="Tajweed rules within this ayah">🔤 Tajweed in Ayah</button>
           <a class="absave" href="${url}" download="Surah${s.id}_Ayah${a.n}_Hussary.mp3">💾</a>
@@ -742,6 +779,349 @@ function openAyahTJ(sId,ayahN){
 }
 function closeAyahTJ(){document.getElementById('ayahtjmodal').classList.remove('open');}
 document.getElementById('ayahtjmodal').onclick=function(e){if(e.target===this)closeAyahTJ();};
+
+// ─── RECORD & RATE (experimental, 100% client-side rhythm comparison) ──────────
+// NOTE: this measures TIMING/RHYTHM similarity to Al-Hussary's recitation via
+// energy-envelope DTW alignment. It does NOT check individual tajweed rules
+// (madd length, qalqalah, ghunnah, etc.) — that needs validated per-ayah rule
+// data this app doesn't have. Treat scores as practice feedback, not grading.
+
+// Set this to your deployed microservice's URL (e.g.
+// 'https://your-service.onrender.com') once you've deployed it — see
+// the microservice's own README for deployment steps. Leave empty ('')
+// to keep using the built-in client-side rhythm-only comparison.
+const TAJWEED_API_BASE='';
+
+let rrState=null;
+
+function openRR(sId,ayahN){
+  const s=SURAHS.find(x=>x.id===sId);
+  if(!s)return;
+  const a=s.ayahs.find(x=>x.n===ayahN);
+  if(!a)return;
+  if(curAudio){curAudio.pause();if(curCard){curCard.classList.remove('playing');const b=curCard.querySelector('.abplay');if(b){b.classList.remove('on');b.textContent='▶ Play';}}curAudio=null;curCard=null;}
+  rrState={sId,ayahN,mediaRecorder:null,chunks:[],studentBlob:null,studentUrl:null,recording:false,busy:false,stream:null,audioCtx:null};
+  document.getElementById('rrm-title').textContent=`Record & Rate — ${s.name} ${sId}:${ayahN}`;
+  rrRender();
+  document.getElementById('rrmodal').classList.add('open');
+}
+function closeRR(){
+  if(rrState){
+    try{if(rrState.recording&&rrState.mediaRecorder)rrState.mediaRecorder.stop();}catch(e){}
+    if(rrState.stream)rrState.stream.getTracks().forEach(t=>t.stop());
+    if(rrState.studentUrl)URL.revokeObjectURL(rrState.studentUrl);
+  }
+  document.getElementById('rrmodal').classList.remove('open');
+  rrState=null;
+}
+document.getElementById('rrmodal').onclick=function(e){if(e.target===this)closeRR();};
+
+function rrRender(){
+  const box=document.getElementById('rrm-content');
+  let html;
+  if(TAJWEED_API_BASE){
+    html=`<p class="rr-disclaimer">🎯 Connected to the tajweed assessment service — this checks real per-rule tajweed correctness (madd length, qalqalah, etc.), not just timing. Some rules (ghunnah, idghaam, ikhfa, tafkheem) aren't implemented server-side yet and are scored as baseline/timing-only for now.</p>`;
+  }else{
+    html=`<p class="rr-disclaimer">🧪 <strong>Experimental:</strong> this compares the <em>rhythm and timing</em> of your recitation against Sheikh Al-Hussary's using on-device signal processing — it does not verify individual tajweed rules (madd length, qalqalah, ghunnah, etc.). Treat it as practice feedback, not a certified assessment.</p>`;
+  }
+  html+='<div class="rr-record-row">';
+  if(!rrState.studentBlob){
+    html+=`<button class="rr-record-btn ${rrState.recording?'recording':''}" onclick="rrToggleRecord()">${rrState.recording?'⏹ Stop Recording':'🎙️ Start Recording'}</button>`;
+    html+=`<div class="rr-status" id="rr-status">${rrState.recording?'Recording… recite the ayah, then press Stop.':'Press record, then recite this ayah aloud into your microphone.'}</div>`;
+  }else{
+    html+=`<div class="rr-playback-row">
+      <audio controls src="${rrState.studentUrl}"></audio>
+      <button class="atj-btn" onclick="rrReset()">🔁 Re-record</button>
+      <button class="abplay" onclick="rrCompare()">📊 Compare to Al-Hussary</button>
+    </div>`;
+    html+=`<div class="rr-status" id="rr-status">${rrState.busy?'Analyzing…':'Ready to compare.'}</div>`;
+  }
+  html+='</div><div id="rr-results"></div>';
+  box.innerHTML=html;
+}
+
+async function rrToggleRecord(){
+  if(rrState.recording){
+    try{rrState.mediaRecorder.stop();}catch(e){}
+    return;
+  }
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    const el=document.getElementById('rr-status');
+    if(el)el.textContent='⚠ Microphone recording needs a secure context (https:// or localhost) — it may not work opening this file directly.';
+    return;
+  }
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    rrState.stream=stream;
+    const mr=new MediaRecorder(stream);
+    rrState.mediaRecorder=mr;
+    rrState.chunks=[];
+    mr.ondataavailable=e=>{if(e.data.size>0)rrState.chunks.push(e.data);};
+    mr.onstop=()=>{
+      rrState.studentBlob=new Blob(rrState.chunks,{type:mr.mimeType||'audio/webm'});
+      rrState.studentUrl=URL.createObjectURL(rrState.studentBlob);
+      rrState.recording=false;
+      stream.getTracks().forEach(t=>t.stop());
+      rrRender();
+    };
+    mr.start();
+    rrState.recording=true;
+    rrRender();
+  }catch(err){
+    const el=document.getElementById('rr-status');
+    if(el)el.textContent='⚠ Microphone access denied or unavailable — check your browser/site permissions.';
+  }
+}
+
+function rrReset(){
+  if(rrState.studentUrl)URL.revokeObjectURL(rrState.studentUrl);
+  rrState.studentBlob=null;rrState.studentUrl=null;rrState.chunks=[];
+  rrRender();
+}
+
+function rrGetAudioCtx(){
+  if(!rrState.audioCtx)rrState.audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+  return rrState.audioCtx;
+}
+async function rrDecodeUrl(ctx,url){
+  const resp=await fetch(url);
+  if(!resp.ok)throw new Error('Could not download reference audio');
+  const buf=await resp.arrayBuffer();
+  return await ctx.decodeAudioData(buf);
+}
+async function rrDecodeBlob(ctx,blob){
+  const buf=await blob.arrayBuffer();
+  return await ctx.decodeAudioData(buf);
+}
+function rrMonoData(buffer){
+  if(buffer.numberOfChannels===1)return buffer.getChannelData(0);
+  const len=buffer.length,out=new Float32Array(len);
+  for(let ch=0;ch<buffer.numberOfChannels;ch++){
+    const d=buffer.getChannelData(ch);
+    for(let i=0;i<len;i++)out[i]+=d[i]/buffer.numberOfChannels;
+  }
+  return out;
+}
+// short-time RMS energy envelope — a simple, fully portable stand-in for the
+// spectral features (MFCCs) the Python prototype used; enough to capture the
+// broad rhythm/pausing shape of a recitation without any native libraries.
+function rrEnergyEnvelope(data,sr,winMs=25,hopMs=10){
+  const win=Math.max(1,Math.round(sr*winMs/1000));
+  const hop=Math.max(1,Math.round(sr*hopMs/1000));
+  const frames=[];
+  for(let start=0;start+win<=data.length;start+=hop){
+    let sum=0;
+    for(let i=0;i<win;i++){const v=data[start+i];sum+=v*v;}
+    frames.push(Math.sqrt(sum/win));
+  }
+  return frames;
+}
+function rrTrimSilence(env,thresholdRatio=0.06){
+  const max=Math.max(...env,1e-9),thr=max*thresholdRatio;
+  let start=0,end=env.length-1;
+  while(start<env.length&&env[start]<thr)start++;
+  while(end>start&&env[end]<thr)end--;
+  return {start,end:end+1};
+}
+// word-like segment detection via silence gaps — mirrors the "EnergySegmenter"
+// idea from the prototype, run on the reference (Al-Hussary) envelope only.
+function rrDetectSegments(env,thresholdRatio=0.12,minGapFrames=3,minSegFrames=3){
+  const max=Math.max(...env,1e-9),thr=max*thresholdRatio;
+  const segs=[];
+  let segStart=null,gapCount=0;
+  for(let i=0;i<env.length;i++){
+    if(env[i]>=thr){
+      if(segStart===null)segStart=i;
+      gapCount=0;
+    }else if(segStart!==null){
+      gapCount++;
+      if(gapCount>=minGapFrames){
+        const segEnd=i-gapCount+1;
+        if(segEnd-segStart>=minSegFrames)segs.push([segStart,segEnd]);
+        segStart=null;gapCount=0;
+      }
+    }
+  }
+  if(segStart!==null){
+    const segEnd=env.length-gapCount;
+    if(segEnd-segStart>=minSegFrames)segs.push([segStart,segEnd]);
+  }
+  return segs;
+}
+// classic Dynamic Time Warping — same technique as dtw_align.py, reimplemented
+// in plain JS (no librosa needed: DTW is just dynamic programming over a cost
+// matrix). Aligns the student's envelope onto the reference's timeline.
+function rrDTW(a,b){
+  const n=a.length,m=b.length;
+  const D=new Array(n+1);
+  for(let i=0;i<=n;i++)D[i]=new Float64Array(m+1).fill(Infinity);
+  D[0][0]=0;
+  for(let i=1;i<=n;i++)for(let j=1;j<=m;j++){
+    const cost=Math.abs(a[i-1]-b[j-1]);
+    D[i][j]=cost+Math.min(D[i-1][j],D[i][j-1],D[i-1][j-1]);
+  }
+  let i=n,j=m;const path=[];
+  while(i>0&&j>0){
+    path.push([i-1,j-1]);
+    const opts=[[D[i-1][j-1],i-1,j-1],[D[i-1][j],i-1,j],[D[i][j-1],i,j-1]];
+    opts.sort((x,y)=>x[0]-y[0]);
+    i=opts[0][1];j=opts[0][2];
+  }
+  path.reverse();
+  return {cost:D[n][m],path};
+}
+
+async function rrCompare(){
+  if(TAJWEED_API_BASE){
+    try{
+      await rrCompareViaAPI();
+      return;
+    }catch(err){
+      console.warn('Tajweed assessment API unavailable, falling back to client-side rhythm comparison:',err);
+      const status=()=>document.getElementById('rr-status');
+      if(status())status().textContent='Assessment service unreachable — falling back to on-device rhythm comparison…';
+    }
+  }
+  await rrCompareClientSide();
+}
+
+async function rrCompareViaAPI(){
+  const status=()=>document.getElementById('rr-status');
+  rrState.busy=true;
+  if(status())status().textContent='Analyzing… sending to tajweed assessment service…';
+  try{
+    const form=new FormData();
+    form.append('surah',rrState.sId);
+    form.append('ayah',rrState.ayahN);
+    form.append('audio',rrState.studentBlob,'student.webm');
+    const resp=await fetch(`${TAJWEED_API_BASE}/assess`,{method:'POST',body:form});
+    if(!resp.ok){
+      const bodyText=await resp.text().catch(()=>'');
+      throw new Error(`Service returned ${resp.status}${bodyText?': '+bodyText.slice(0,200):''}`);
+    }
+    const data=await resp.json();
+    rrRenderApiResults(data);
+  }finally{
+    rrState.busy=false;
+    if(status())status().textContent='Ready to compare.';
+  }
+}
+
+function rrRenderApiResults(data){
+  const report=data.report;
+  const overall=report.overall_score;
+  const scoreColor=overall>=80?'#4cb880':overall>=60?'#e8a520':'#e05840';
+  let html=`<div class="rr-score-badge" style="border-color:${scoreColor};color:${scoreColor}">
+    <div class="rr-score-num">${Math.round(overall)}</div>
+    <div class="rr-score-label">Tajweed Score</div>
+  </div>`;
+  html+='<div class="rr-rule-summary">'+Object.entries(report.by_rule_type).map(([rt,sc])=>{
+    const col=sc>=80?'#4cb880':sc>=60?'#e8a520':'#e05840';
+    return `<span class="rr-rule-pill" style="border-color:${col};color:${col}">${rt}: ${Math.round(sc)}</span>`;
+  }).join('')+'</div>';
+  html+='<table class="rr-table"><thead><tr><th>Segment</th><th>Rule</th><th>Verdict</th><th>Score</th></tr></thead><tbody>';
+  report.segments.forEach(seg=>{
+    const col=seg.score>=80?'#4cb880':seg.score>=60?'#e8a520':'#e05840';
+    html+=`<tr><td>${seg.segment_label}</td><td>${seg.rule_type}</td><td>${seg.verdict}</td><td style="color:${col}">${Math.round(seg.score)}</td></tr>`;
+  });
+  html+='</tbody></table>';
+  document.getElementById('rr-results').innerHTML=html;
+}
+
+async function rrCompareClientSide(){
+  const status=()=>document.getElementById('rr-status');
+  rrState.busy=true;
+  if(status())status().textContent='Analyzing… downloading Al-Hussary reference…';
+  try{
+    const pad=n=>n<10?'00'+n:n<100?'0'+n:''+n;
+    const url=`https://everyayah.com/data/Husary_128kbps/${pad(rrState.sId)}${pad(rrState.ayahN)}.mp3`;
+    const ctx=rrGetAudioCtx();
+    const [refBuf,stuBuf]=await Promise.all([rrDecodeUrl(ctx,url),rrDecodeBlob(ctx,rrState.studentBlob)]);
+
+    if(status())status().textContent='Analyzing… comparing rhythm and timing…';
+
+    const refEnvFull=rrEnergyEnvelope(rrMonoData(refBuf),refBuf.sampleRate);
+    const stuEnvFull=rrEnergyEnvelope(rrMonoData(stuBuf),stuBuf.sampleRate);
+    const refTrim=rrTrimSilence(refEnvFull),stuTrim=rrTrimSilence(stuEnvFull);
+    const refEnv=refEnvFull.slice(refTrim.start,refTrim.end);
+    const stuEnv=stuEnvFull.slice(stuTrim.start,stuTrim.end);
+
+    if(refEnv.length<3||stuEnv.length<3){
+      document.getElementById('rr-results').innerHTML="<p class=\"rr-disclaimer\">⚠ Couldn't detect enough speech in one of the recordings. Try again a little closer to the mic, in a quiet space.</p>";
+      rrState.busy=false;if(status())status().textContent='Ready to compare.';
+      return;
+    }
+
+    const segs=rrDetectSegments(refEnv);
+    const useSegs=segs.length>=2?segs:[[0,refEnv.length]];
+
+    const norm=arr=>{const m=Math.max(...arr,1e-9);return arr.map(v=>v/m);};
+    const refNorm=norm(refEnv),stuNorm=norm(stuEnv);
+    const {path}=rrDTW(refNorm,stuNorm);
+
+    const map=new Array(refEnv.length).fill(0);
+    let pi=0;
+    for(let ri=0;ri<refEnv.length;ri++){
+      while(pi<path.length-1&&path[pi][0]<ri)pi++;
+      map[ri]=path[pi][1];
+    }
+
+    const hopMs=10;
+    const segRows=useSegs.map(([segS,segE],idx)=>{
+      const refDurMs=(segE-segS)*hopMs;
+      const stuS=map[Math.min(segS,map.length-1)];
+      const stuE=map[Math.min(segE-1,map.length-1)]+1;
+      const stuDurMs=Math.max(hopMs,(stuE-stuS)*hopMs);
+      const ratio=stuDurMs/refDurMs;
+      const score=Math.max(0,100*(1-Math.min(1,Math.abs(1-ratio))));
+      let verdict='good pace';
+      if(ratio>1.35)verdict='held too long';
+      else if(ratio<0.7)verdict='too rushed';
+      return {idx:idx+1,refDurMs,stuDurMs,score,verdict};
+    });
+
+    const overall=segRows.reduce((a,r)=>a+r.score,0)/segRows.length;
+    rrRenderResults(overall,segRows,refNorm,stuNorm);
+
+  }catch(err){
+    document.getElementById('rr-results').innerHTML=`<p class="rr-disclaimer">⚠ Comparison failed — ${(err&&err.message)||'the reference audio may be unreachable (check your internet connection).'}</p>`;
+  }finally{
+    rrState.busy=false;
+    if(status())status().textContent='Ready to compare.';
+  }
+}
+
+function rrRenderResults(overall,segRows,refNorm,stuNorm){
+  const scoreColor=overall>=80?'#4cb880':overall>=60?'#e8a520':'#e05840';
+  let html=`<div class="rr-score-badge" style="border-color:${scoreColor};color:${scoreColor}">
+    <div class="rr-score-num">${Math.round(overall)}</div>
+    <div class="rr-score-label">Rhythm Match Score</div>
+  </div>`;
+  html+='<canvas id="rr-canvas" width="600" height="140" class="rr-canvas"></canvas>';
+  html+='<div class="rr-legend"><span style="color:#f5d060">■</span> Al-Hussary &nbsp; <span style="color:#4a9fdf">■</span> Your recitation</div>';
+  html+='<table class="rr-table"><thead><tr><th>Segment</th><th>Al-Hussary</th><th>You</th><th>Match</th></tr></thead><tbody>';
+  segRows.forEach(r=>{
+    const col=r.score>=80?'#4cb880':r.score>=60?'#e8a520':'#e05840';
+    html+=`<tr><td>${r.idx}</td><td>${(r.refDurMs/1000).toFixed(2)}s</td><td>${(r.stuDurMs/1000).toFixed(2)}s</td><td style="color:${col}">${Math.round(r.score)}% · ${r.verdict}</td></tr>`;
+  });
+  html+='</tbody></table>';
+  document.getElementById('rr-results').innerHTML=html;
+
+  const canvas=document.getElementById('rr-canvas');
+  const cctx=canvas.getContext('2d');
+  const w=canvas.width,h=canvas.height;
+  cctx.clearRect(0,0,w,h);
+  const drawEnv=(env,color)=>{
+    cctx.beginPath();
+    for(let i=0;i<env.length;i++){
+      const x=(i/(env.length-1))*w,y=h-env[i]*h*0.9-5;
+      if(i===0)cctx.moveTo(x,y);else cctx.lineTo(x,y);
+    }
+    cctx.strokeStyle=color;cctx.lineWidth=2;cctx.stroke();
+  };
+  drawEnv(refNorm,'#f5d060');
+  drawEnv(stuNorm,'#4a9fdf');
+}
 
 function setSubtab(id,tab){
   const tabBar=document.getElementById('st-'+id);
