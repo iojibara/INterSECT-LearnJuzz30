@@ -95,6 +95,10 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 5rem;}
 .lmode label{font-size:.8rem;color:var(--dim);margin-right:.5rem;}
 .lmbtn{padding:.35rem .9rem;border-radius:20px;border:1px solid var(--brd);background:var(--sur2);color:var(--muted);font-size:.78rem;cursor:pointer;transition:all .15s;font-family:'Georgia',serif;}
 .lmbtn:hover{border-color:var(--gold2);color:var(--gold2);}
+.playall-btn{padding:.35rem .9rem;border-radius:20px;border:1px solid var(--teal);background:var(--sur2);color:var(--teal);font-size:.78rem;cursor:pointer;transition:all .15s;font-family:'Georgia',serif;margin-left:auto;}
+.playall-btn:hover{background:var(--teal);color:#0d1a10;}
+.playall-btn.on{background:var(--teal);border-color:transparent;color:#0d1a10;font-weight:700;animation:playallpulse 1.4s ease-in-out infinite;}
+@keyframes playallpulse{0%,100%{opacity:1;}50%{opacity:.72;}}
 .lmbtn.on{background:var(--gold);border-color:transparent;color:#0d1a10;font-weight:700;}
 
 /* ── AYAH CARDS ── */
@@ -388,6 +392,7 @@ function buildSurahNav(){
 }
 
 function showSurah(id){
+  stopPlayAll();
   curS=id;
   // Update nav
   document.querySelectorAll('.stab').forEach(t=>t.classList.toggle('on',+t.dataset.id===id));
@@ -433,6 +438,7 @@ function buildSurahPanel(id){
       <div class="lmode">
         <label>Learning Mode:</label>
         ${['understand','know','recite','memorize'].map(m=>`<button class="lmbtn${m==='understand'?' on':''}" onclick="setLM(${id},'${m}')">${{understand:'🧠 Understand',know:'🔑 Key Words',recite:'🎵 Recite',memorize:'💡 Memorize'}[m]}</button>`).join('')}
+        <button class="playall-btn" id="playall-${id}" onclick="togglePlayAll(${id})">▶️ Play All</button>
       </div>
       <div class="acards" id="ac-${id}">${buildAyahCards(s)}</div>
     </div>
@@ -804,6 +810,7 @@ function openRR(sId,ayahN){
   if(!s)return;
   const a=s.ayahs.find(x=>x.n===ayahN);
   if(!a)return;
+  if(playAllState)stopPlayAll();
   if(curAudio){curAudio.pause();if(curCard){curCard.classList.remove('playing');const b=curCard.querySelector('.abplay');if(b){b.classList.remove('on');b.textContent='▶ Play';}}curAudio=null;curCard=null;}
   rrState={sId,ayahN,arText:a.ar,enText:a.en,mediaRecorder:null,chunks:[],studentBlob:null,studentUrl:null,recording:false,busy:false,stream:null,audioCtx:null};
   document.getElementById('rrm-title').textContent=`Record & Rate — ${s.name} ${sId}:${ayahN}`;
@@ -1209,8 +1216,82 @@ function setLM(id,mode){
   setMsg(msgs[mode]);
 }
 
+// ─── PLAY ALL (sequential recitation with auto-scroll) ──────────
+let playAllState=null; // {sId, index, cancelled}
+
+function togglePlayAll(sId){
+  if(playAllState&&playAllState.sId===sId&&!playAllState.cancelled){
+    stopPlayAll();
+    return;
+  }
+  stopPlayAll();
+  if(curAudio){
+    curAudio.pause();
+    if(curCard){curCard.classList.remove('playing');const b=curCard.querySelector('.abplay');if(b){b.classList.remove('on');b.textContent='▶ Play';}}
+    curAudio=null;curCard=null;
+  }
+  const s=SURAHS.find(x=>x.id===sId);
+  if(!s||!s.ayahs.length)return;
+  playAllState={sId,index:0,cancelled:false};
+  updatePlayAllBtn(sId,true);
+  playAllStep(s);
+}
+
+function stopPlayAll(){
+  if(playAllState)updatePlayAllBtn(playAllState.sId,false);
+  playAllState=null;
+  if(curAudio){
+    curAudio.onended=null;
+    curAudio.pause();
+    if(curCard){curCard.classList.remove('playing');const b=curCard.querySelector('.abplay');if(b){b.classList.remove('on');b.textContent='▶ Play';}}
+    curAudio=null;curCard=null;
+  }
+}
+
+function updatePlayAllBtn(sId,playing){
+  const btn=document.getElementById('playall-'+sId);
+  if(!btn)return;
+  btn.classList.toggle('on',playing);
+  btn.textContent=playing?'⏹ Stop':'▶️ Play All';
+}
+
+function playAllStep(s){
+  if(!playAllState||playAllState.cancelled||playAllState.sId!==s.id)return;
+  if(playAllState.index>=s.ayahs.length){
+    updatePlayAllBtn(s.id,false);
+    playAllState=null;
+    setMsg(`✓ Finished playing ${s.name}`);
+    return;
+  }
+  const a=s.ayahs[playAllState.index];
+  const card=document.getElementById('ac'+s.id+'_'+a.n);
+  if(card)card.scrollIntoView({behavior:'smooth',block:'center'});
+
+  const pad=n=>n<10?'00'+n:n<100?'0'+n:''+n;
+  const url=`https://everyayah.com/data/Husary_128kbps/${pad(s.id)}${pad(a.n)}.mp3`;
+  const playBtn=card?card.querySelector('.abplay'):null;
+  if(card)card.classList.add('playing');
+  if(playBtn){playBtn.classList.add('on');playBtn.textContent='❚❚ Playing';}
+  curCard=card;
+  curAudio=new Audio(url);
+  curAudio.play().then(()=>{
+    setMsg(`▶ Playing All — ${s.name}, Ayah ${a.n} of ${s.ayahs.length}`);
+  }).catch(()=>{
+    setMsg('⚠ Audio requires internet · check connection');
+    stopPlayAll();
+  });
+  curAudio.onended=()=>{
+    if(card){card.classList.remove('playing');if(playBtn){playBtn.classList.remove('on');playBtn.textContent='▶ Play';}}
+    curAudio=null;curCard=null;
+    if(!playAllState||playAllState.cancelled)return;
+    playAllState.index++;
+    playAllStep(s);
+  };
+}
+
 // ─── AUDIO ─────────────────────────────────────────────────────
 function playAudio(btn,url,id){
+  if(playAllState)stopPlayAll();
   if(curAudio){
     curAudio.pause();
     if(curCard){curCard.classList.remove('playing');curCard.querySelector('.abplay').classList.remove('on');curCard.querySelector('.abplay').textContent='▶ Play';}
