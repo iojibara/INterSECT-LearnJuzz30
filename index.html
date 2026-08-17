@@ -141,6 +141,7 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 5rem;}
 .acard{background:var(--sur);border:1px solid var(--brd);border-radius:var(--r);padding:1.25rem;transition:border-color .15s;}
 .acard:hover{border-color:var(--brd2);}
 .acard.playing{border-color:var(--gold);background:var(--sur2);}
+.bismillah.playing{color:var(--gold3);text-shadow:0 0 16px rgba(232,184,32,.4);}
 
 /* Card top bar */
 .atop{display:flex;align-items:center;gap:.6rem;margin-bottom:.9rem;flex-wrap:wrap;}
@@ -713,7 +714,7 @@ function buildAyahCards(s){
   const KWC=['#e8a520','#4a9fdf','#4cb880','#e05840','#a060df','#20a8a0'];
 
   // Surah 1's first ayah IS the Bismillah — don't add a duplicate header
-  const bism=s.id===1?'':'<div class="bismillah">بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ</div><div class="orn">❧</div>';
+  const bism=s.id===1?'':`<div class="bismillah" id="bism${s.id}">بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ</div><div class="orn">❧</div>`;
 
   return bism+s.ayahs.map(a=>{
     const url=`https://everyayah.com/data/Ibrahim_Akhdar_32kbps/${pad(s.id)}${pad(a.n)}.mp3`;
@@ -1406,9 +1407,10 @@ function setLM(id,mode){
 }
 
 // ─── PLAY ALL (sequential recitation with auto-scroll) ──────────
-let playAllState=null; // {sId, index, cancelled}
+let playAllState=null; // {sId, index, cancelled, bismillahDone}
+let curBismEl=null;
 let juzPlayState=null; // {index, cancelled} -- index into JUZ_FLAT_LIST, spans all 38 surahs
-let juzCurAudio=null, juzCurCard=null, juzWakeLock=null;
+let juzCurAudio=null, juzCurCard=null, juzCurBismEl=null, juzWakeLock=null;
 const JUZ_FLAT_LIST=SURAHS.flatMap(s=>s.ayahs.map(a=>({sId:s.id,n:a.n})));
 
 function togglePlayAll(sId){
@@ -1433,6 +1435,7 @@ function togglePlayAll(sId){
 function stopPlayAll(){
   if(playAllState)updatePlayAllBtn(playAllState.sId,false);
   playAllState=null;
+  if(curBismEl){curBismEl.classList.remove('playing');curBismEl=null;}
   if(curAudio){
     curAudio.onended=null;
     curAudio.pause();
@@ -1491,6 +1494,7 @@ function toggleJuzPlayAll(){
 function stopJuzPlayAll(){
   const wasActive=!!juzPlayState;
   juzPlayState=null;
+  if(juzCurBismEl){juzCurBismEl.classList.remove('playing');juzCurBismEl=null;}
   if(juzCurAudio){
     juzCurAudio.onended=null;
     juzCurAudio.pause();
@@ -1558,6 +1562,7 @@ function juzPlayStep(){
         if(!juzPlayState)return;
         if(juzCurAudio)juzCurAudio.onended=null;
         if(juzCurCard)juzCurCard.classList.remove('playing');
+        if(juzCurBismEl){juzCurBismEl.classList.remove('playing');juzCurBismEl=null;}
         juzPlayState.index++;
         juzPlayStep();
       });
@@ -1576,19 +1581,66 @@ function juzPlayStep(){
     };
   };
 
+  // Every surah except Al-Fatihah must be preceded by the Bismillah
+  // recitation before its first ayah -- Al-Fatihah's own ayah 1 IS the
+  // Bismillah (verbatim), so no separate clip is prepended there.
+  const needsBismillah=(n===1&&sId!==1&&juzPlayState.bismillahDoneFor!==sId);
+  const playThisStep=()=>{
+    if(needsBismillah){
+      juzPlayState.bismillahDoneFor=sId;
+      playJuzBismillah(s,startPlayback);
+    }else{
+      startPlayback();
+    }
+  };
+
   // Navigate to this surah's panel if it isn't already the one showing,
-  // and make sure the Study tab (where ayah cards live) is active.
+  // and make sure the Study tab (where ayah cards and the Bismillah
+  // heading live) is active.
   if(curS!==sId){
     showSurah(sId);
     setSubtab(sId,'study');
     // showSurah/setSubtab render synchronously, but give the browser one
     // frame to finish painting the newly-shown panel before we try to
-    // scroll to a specific card inside it.
-    requestAnimationFrame(startPlayback);
+    // scroll to a specific element inside it.
+    requestAnimationFrame(playThisStep);
   }else{
     setSubtab(sId,'study');
-    startPlayback();
+    playThisStep();
   }
+}
+
+// Plays the shared Bismillah audio clip -- everyayah.com's file for
+// Al-Fatihah ayah 1, which IS exactly "Bismillahir-Rahmanir-Raheem" and
+// nothing else -- scrolling to and highlighting the surah's own Bismillah
+// heading while it plays, before handing off to the callback that plays
+// the surah's actual first ayah.
+function playJuzBismillah(s,callback){
+  const bismEl=document.getElementById('bism'+s.id);
+  if(bismEl){
+    bismEl.scrollIntoView({behavior:'smooth',block:'center'});
+    bismEl.classList.add('playing');
+  }
+  juzCurBismEl=bismEl;
+  juzCurAudio=new Audio('https://everyayah.com/data/Ibrahim_Akhdar_32kbps/001001.mp3');
+  if('mediaSession' in navigator){
+    navigator.mediaSession.metadata=new MediaMetadata({
+      title:`${s.name} — Bismillah`,
+      artist:'Sheikh Ibrahim Akhdar',
+      album:'Juz 30 + Al-Fatihah'
+    });
+    navigator.mediaSession.playbackState='playing';
+  }
+  juzCurAudio.play().catch(()=>{
+    setMsg('⚠ Audio requires internet · check connection');
+    stopJuzPlayAll();
+  });
+  juzCurAudio.onended=()=>{
+    if(juzCurBismEl){juzCurBismEl.classList.remove('playing');juzCurBismEl=null;}
+    juzCurAudio=null;
+    if(!juzPlayState||juzPlayState.cancelled)return;
+    callback();
+  };
 }
 
 
@@ -1598,6 +1650,14 @@ function playAllStep(s){
     updatePlayAllBtn(s.id,false);
     playAllState=null;
     setMsg(`✓ Finished playing ${s.name}`);
+    return;
+  }
+  // Every surah except Al-Fatihah must be preceded by the Bismillah
+  // recitation before its first ayah -- Al-Fatihah's own ayah 1 IS the
+  // Bismillah (verbatim), so no separate clip is prepended there.
+  if(playAllState.index===0&&s.id!==1&&!playAllState.bismillahDone){
+    playAllState.bismillahDone=true;
+    playBismillah(s.id,()=>playAllStep(s));
     return;
   }
   const a=s.ayahs[playAllState.index];
@@ -1623,6 +1683,32 @@ function playAllStep(s){
     if(!playAllState||playAllState.cancelled)return;
     playAllState.index++;
     playAllStep(s);
+  };
+}
+
+// Plays the shared Bismillah audio clip -- everyayah.com's file for
+// Al-Fatihah ayah 1, which IS exactly "Bismillahir-Rahmanir-Raheem" and
+// nothing else -- scrolling to and highlighting the surah's own Bismillah
+// heading while it plays. Used to prefix every surah's recitation in
+// playAllStep and juzPlayStep, except Al-Fatihah's own (see above).
+function playBismillah(sId,callback){
+  const bismEl=document.getElementById('bism'+sId);
+  if(bismEl){
+    bismEl.scrollIntoView({behavior:'smooth',block:'center'});
+    bismEl.classList.add('playing');
+  }
+  curBismEl=bismEl;
+  curAudio=new Audio('https://everyayah.com/data/Ibrahim_Akhdar_32kbps/001001.mp3');
+  curAudio.play().then(()=>{
+    setMsg('▶ Playing Bismillah…');
+  }).catch(()=>{
+    setMsg('⚠ Audio requires internet · check connection');
+    stopPlayAll();
+  });
+  curAudio.onended=()=>{
+    if(curBismEl){curBismEl.classList.remove('playing');curBismEl=null;}
+    curAudio=null;
+    callback();
   };
 }
 
