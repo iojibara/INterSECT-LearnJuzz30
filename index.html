@@ -29,6 +29,21 @@ header{background:var(--sur);border-bottom:2px solid var(--gold);padding:1rem 1.
 .badge.ok{border-color:var(--brd2);color:var(--muted);}
 .btn-tj{background:var(--gold);color:#0d1a10;border:none;padding:.4rem 1rem;border-radius:20px;font-size:.82rem;font-weight:700;cursor:pointer;font-family:'Georgia',serif;}
 .btn-tj:hover{background:var(--gold2);}
+.btn-juzplay{background:var(--teal);color:#0d1a10;border:none;padding:.4rem 1rem;border-radius:20px;font-size:.82rem;font-weight:700;cursor:pointer;font-family:'Georgia',serif;transition:background .15s;}
+.btn-juzplay:hover{background:#38948a;}
+.btn-juzplay.on{background:var(--red);color:#fff;}
+.btn-juzplay.on:hover{background:#d85a48;}
+.juz-progress-bar{display:none;position:sticky;top:var(--header-h,64px);z-index:190;background:var(--sur2);border-bottom:1px solid var(--brd2);padding:.55rem 1.5rem;align-items:center;gap:1rem;flex-wrap:wrap;}
+.juz-progress-bar.on{display:flex;}
+.juz-progress-text{font-size:.78rem;color:var(--text);white-space:nowrap;flex-shrink:0;}
+.juz-progress-track{flex:1;min-width:120px;height:6px;background:var(--sur3);border-radius:4px;overflow:hidden;}
+.juz-progress-fill{height:100%;background:linear-gradient(90deg,var(--teal),var(--gold2));border-radius:4px;transition:width .3s ease;width:0%;}
+.juz-progress-pct{font-size:.72rem;color:var(--muted);flex-shrink:0;min-width:34px;text-align:right;}
+.juz-progress-stop{background:var(--sur3);border:1px solid var(--brd2);color:var(--text);border-radius:14px;padding:.25rem .8rem;font-size:.72rem;cursor:pointer;flex-shrink:0;}
+.juz-progress-stop:hover{border-color:var(--red);color:var(--red);}
+@media(max-width:640px){
+  .juz-progress-bar{top:auto;position:relative;}
+}
 
 /* ── SURAH NAVIGATION ── */
 #snav{background:var(--sur2);border-bottom:1px solid var(--brd);padding:.6rem 1.5rem;overflow-x:auto;white-space:nowrap;display:flex;gap:.4rem;}
@@ -308,8 +323,15 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 5rem;}
     <span class="badge">📴 Page works offline</span>
     <span class="badge">🕌 38 Surahs · 571 Ayahs</span>
   </div>
+  <button class="btn-juzplay" id="btnJuzPlay" onclick="toggleJuzPlayAll()">▶️ Play All Juz 30</button>
   <button class="btn-tj" onclick="openTJ()">📖 Tajweed Guide</button>
 </header>
+<div class="juz-progress-bar" id="juzProgressBar">
+  <span class="juz-progress-text" id="juzProgressText">—</span>
+  <div class="juz-progress-track"><div class="juz-progress-fill" id="juzProgressFill"></div></div>
+  <span class="juz-progress-pct" id="juzProgressPct">0%</span>
+  <button class="juz-progress-stop" onclick="stopJuzPlayAll()">⏹ Stop</button>
+</div>
 
 <nav id="snav"></nav>
 <main id="main"></main>
@@ -396,6 +418,12 @@ function init(){
   buildSurahNav();
   buildTajweedModal();
   showSurah(1);
+  updateHeaderHeightVar();
+  window.addEventListener('resize',updateHeaderHeightVar);
+}
+function updateHeaderHeightVar(){
+  const h=document.querySelector('header');
+  if(h)document.documentElement.style.setProperty('--header-h',h.offsetHeight+'px');
 }
 
 function buildSurahNav(){
@@ -1379,8 +1407,12 @@ function setLM(id,mode){
 
 // ─── PLAY ALL (sequential recitation with auto-scroll) ──────────
 let playAllState=null; // {sId, index, cancelled}
+let juzPlayState=null; // {index, cancelled} -- index into JUZ_FLAT_LIST, spans all 38 surahs
+let juzCurAudio=null, juzCurCard=null, juzWakeLock=null;
+const JUZ_FLAT_LIST=SURAHS.flatMap(s=>s.ayahs.map(a=>({sId:s.id,n:a.n})));
 
 function togglePlayAll(sId){
+  stopJuzPlayAll();
   if(playAllState&&playAllState.sId===sId&&!playAllState.cancelled){
     stopPlayAll();
     return;
@@ -1415,6 +1447,150 @@ function updatePlayAllBtn(sId,playing){
   btn.classList.toggle('on',playing);
   btn.textContent=playing?'⏹ Stop':'▶️ Play All';
 }
+
+// ─── JUZ-WIDE CONTINUOUS PLAYBACK (all 38 surahs, 571 ayahs) ─────
+// Keeps the screen awake via the Wake Lock API and registers Media
+// Session metadata so playback can continue reliably on mobile even
+// if the phone screen would otherwise lock, and so lock-screen/
+// notification media controls show something meaningful.
+async function requestJuzWakeLock(){
+  try{
+    if('wakeLock' in navigator){
+      juzWakeLock=await navigator.wakeLock.request('screen');
+      juzWakeLock.addEventListener('release',()=>{juzWakeLock=null;});
+    }
+  }catch(e){
+    // Not supported, or permission denied (e.g. low battery mode) --
+    // playback still continues, the screen may simply dim/lock sooner.
+  }
+}
+function releaseJuzWakeLock(){
+  if(juzWakeLock){try{juzWakeLock.release();}catch(e){}juzWakeLock=null;}
+}
+document.addEventListener('visibilitychange',async()=>{
+  if(document.visibilityState==='visible'&&juzPlayState&&!juzPlayState.cancelled&&!juzWakeLock){
+    await requestJuzWakeLock(); // wake locks are auto-released when a tab is hidden; re-acquire on return
+  }
+});
+
+function toggleJuzPlayAll(){
+  if(juzPlayState&&!juzPlayState.cancelled){
+    stopJuzPlayAll();
+    return;
+  }
+  stopPlayAll(); // stop any per-surah playback first, so only one player is ever active
+  stopJuzPlayAll();
+  juzPlayState={index:0,cancelled:false};
+  requestJuzWakeLock();
+  const btn=document.getElementById('btnJuzPlay');
+  if(btn){btn.classList.add('on');btn.textContent='⏹ Stop Playing All';}
+  document.getElementById('juzProgressBar').classList.add('on');
+  juzPlayStep();
+}
+
+function stopJuzPlayAll(){
+  const wasActive=!!juzPlayState;
+  juzPlayState=null;
+  if(juzCurAudio){
+    juzCurAudio.onended=null;
+    juzCurAudio.pause();
+    juzCurAudio=null;
+  }
+  if(juzCurCard){
+    juzCurCard.classList.remove('playing');
+    juzCurCard=null;
+  }
+  releaseJuzWakeLock();
+  if('mediaSession' in navigator)navigator.mediaSession.playbackState='none';
+  const btn=document.getElementById('btnJuzPlay');
+  if(btn){btn.classList.remove('on');btn.textContent='▶️ Play All Juz 30';}
+  document.getElementById('juzProgressBar').classList.remove('on');
+  if(wasActive)setMsg('Playback stopped');
+}
+
+function updateJuzProgressUI(flatIndex,s,a){
+  const total=JUZ_FLAT_LIST.length;
+  const pct=Math.round(((flatIndex+1)/total)*100);
+  const surahPos=SURAHS.findIndex(x=>x.id===s.id)+1;
+  const textEl=document.getElementById('juzProgressText');
+  const fillEl=document.getElementById('juzProgressFill');
+  const pctEl=document.getElementById('juzProgressPct');
+  if(textEl)textEl.textContent=`${s.name} · Ayah ${a.n}/${s.ayahs.length} · Surah ${surahPos}/38 · Overall ${flatIndex+1}/${total}`;
+  if(fillEl)fillEl.style.width=pct+'%';
+  if(pctEl)pctEl.textContent=pct+'%';
+}
+
+function juzPlayStep(){
+  if(!juzPlayState||juzPlayState.cancelled)return;
+  if(juzPlayState.index>=JUZ_FLAT_LIST.length){
+    stopJuzPlayAll();
+    setMsg('✓ Finished reciting all of Juz 30 + Al-Fatihah');
+    return;
+  }
+  const {sId,n}=JUZ_FLAT_LIST[juzPlayState.index];
+  const s=SURAHS.find(x=>x.id===sId);
+  const a=s.ayahs.find(x=>x.n===n);
+
+  const startPlayback=()=>{
+    const card=document.getElementById('ac'+sId+'_'+n);
+    if(card){
+      card.scrollIntoView({behavior:'smooth',block:'center'});
+      card.classList.add('playing');
+    }
+    juzCurCard=card;
+    updateJuzProgressUI(juzPlayState.index,s,a);
+
+    const pad=x=>x<10?'00'+x:x<100?'0'+x:''+x;
+    const url=`https://everyayah.com/data/Ibrahim_Akhdar_32kbps/${pad(sId)}${pad(n)}.mp3`;
+    juzCurAudio=new Audio(url);
+
+    if('mediaSession' in navigator){
+      navigator.mediaSession.metadata=new MediaMetadata({
+        title:`${s.name} — Ayah ${n}`,
+        artist:'Sheikh Ibrahim Akhdar',
+        album:'Juz 30 + Al-Fatihah'
+      });
+      navigator.mediaSession.playbackState='playing';
+      navigator.mediaSession.setActionHandler('play',()=>juzCurAudio&&juzCurAudio.play());
+      navigator.mediaSession.setActionHandler('pause',()=>juzCurAudio&&juzCurAudio.pause());
+      navigator.mediaSession.setActionHandler('stop',()=>stopJuzPlayAll());
+      navigator.mediaSession.setActionHandler('nexttrack',()=>{
+        if(!juzPlayState)return;
+        if(juzCurAudio)juzCurAudio.onended=null;
+        if(juzCurCard)juzCurCard.classList.remove('playing');
+        juzPlayState.index++;
+        juzPlayStep();
+      });
+    }
+
+    juzCurAudio.play().catch(()=>{
+      setMsg('⚠ Audio requires internet · check connection');
+      stopJuzPlayAll();
+    });
+    juzCurAudio.onended=()=>{
+      if(juzCurCard)juzCurCard.classList.remove('playing');
+      juzCurAudio=null;juzCurCard=null;
+      if(!juzPlayState||juzPlayState.cancelled)return;
+      juzPlayState.index++;
+      juzPlayStep();
+    };
+  };
+
+  // Navigate to this surah's panel if it isn't already the one showing,
+  // and make sure the Study tab (where ayah cards live) is active.
+  if(curS!==sId){
+    showSurah(sId);
+    setSubtab(sId,'study');
+    // showSurah/setSubtab render synchronously, but give the browser one
+    // frame to finish painting the newly-shown panel before we try to
+    // scroll to a specific card inside it.
+    requestAnimationFrame(startPlayback);
+  }else{
+    setSubtab(sId,'study');
+    startPlayback();
+  }
+}
+
 
 function playAllStep(s){
   if(!playAllState||playAllState.cancelled||playAllState.sId!==s.id)return;
