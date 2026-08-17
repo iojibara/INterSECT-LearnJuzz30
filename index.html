@@ -41,6 +41,9 @@ header{background:var(--sur);border-bottom:2px solid var(--gold);padding:1rem 1.
 .juz-progress-pct{font-size:.72rem;color:var(--muted);flex-shrink:0;min-width:34px;text-align:right;}
 .juz-progress-stop{background:var(--sur3);border:1px solid var(--brd2);color:var(--text);border-radius:14px;padding:.25rem .8rem;font-size:.72rem;cursor:pointer;flex-shrink:0;}
 .juz-progress-stop:hover{border-color:var(--red);color:var(--red);}
+.juz-progress-pause{background:var(--sur3);border:1px solid var(--brd2);color:var(--text);border-radius:14px;padding:.25rem .8rem;font-size:.72rem;cursor:pointer;flex-shrink:0;}
+.juz-progress-pause:hover{border-color:var(--gold);color:var(--gold);}
+.juz-progress-pause.on{background:var(--gold);border-color:var(--gold);color:#0d1a10;font-weight:700;}
 @media(max-width:640px){
   .juz-progress-bar{top:auto;position:relative;}
 }
@@ -331,6 +334,7 @@ main{max-width:1100px;margin:0 auto;padding:1.5rem 1.25rem 5rem;}
   <span class="juz-progress-text" id="juzProgressText">—</span>
   <div class="juz-progress-track"><div class="juz-progress-fill" id="juzProgressFill"></div></div>
   <span class="juz-progress-pct" id="juzProgressPct">0%</span>
+  <button class="juz-progress-pause" id="juzPauseBtn" onclick="toggleJuzPause()">⏸ Pause</button>
   <button class="juz-progress-stop" onclick="stopJuzPlayAll()">⏹ Stop</button>
 </div>
 
@@ -1483,12 +1487,52 @@ function toggleJuzPlayAll(){
   }
   stopPlayAll(); // stop any per-surah playback first, so only one player is ever active
   stopJuzPlayAll();
-  juzPlayState={index:0,cancelled:false};
+  juzPlayState={index:0,cancelled:false,paused:false};
   requestJuzWakeLock();
   const btn=document.getElementById('btnJuzPlay');
   if(btn){btn.classList.add('on');btn.textContent='⏹ Stop Playing All';}
   document.getElementById('juzProgressBar').classList.add('on');
+  updateJuzPauseBtn(false);
   juzPlayStep();
+}
+
+// Separate from Stop: pauses in place (keeping the screen awake and the
+// current position remembered) rather than resetting the whole session.
+function toggleJuzPause(){
+  if(!juzPlayState||juzPlayState.cancelled)return;
+  if(juzPlayState.paused)resumeJuzPlay();
+  else pauseJuzPlay();
+}
+function pauseJuzPlay(){
+  if(!juzPlayState||juzPlayState.paused)return;
+  juzPlayState.paused=true;
+  if(juzCurAudio)juzCurAudio.pause();
+  if('mediaSession' in navigator)navigator.mediaSession.playbackState='paused';
+  updateJuzPauseBtn(true);
+  setMsg('⏸ Paused');
+}
+function resumeJuzPlay(){
+  if(!juzPlayState||!juzPlayState.paused)return;
+  juzPlayState.paused=false;
+  updateJuzPauseBtn(false);
+  if('mediaSession' in navigator)navigator.mediaSession.playbackState='playing';
+  if(juzCurAudio){
+    juzCurAudio.play().catch(()=>{
+      setMsg('⚠ Audio requires internet · check connection');
+      stopJuzPlayAll();
+    });
+    setMsg('▶ Resumed');
+  }
+  // If juzCurAudio is null, pause was requested during the brief window
+  // between navigating to a new surah and that step's audio actually being
+  // created -- clearing the flag above is enough, since the pending step
+  // checks juzPlayState.paused itself before deciding whether to auto-play.
+}
+function updateJuzPauseBtn(paused){
+  const btn=document.getElementById('juzPauseBtn');
+  if(!btn)return;
+  btn.classList.toggle('on',paused);
+  btn.textContent=paused?'▶ Resume':'⏸ Pause';
 }
 
 function stopJuzPlayAll(){
@@ -1508,6 +1552,7 @@ function stopJuzPlayAll(){
   if('mediaSession' in navigator)navigator.mediaSession.playbackState='none';
   const btn=document.getElementById('btnJuzPlay');
   if(btn){btn.classList.remove('on');btn.textContent='▶️ Play All Juz 30';}
+  updateJuzPauseBtn(false);
   document.getElementById('juzProgressBar').classList.remove('on');
   if(wasActive)setMsg('Playback stopped');
 }
@@ -1554,9 +1599,9 @@ function juzPlayStep(){
         artist:'Sheikh Ibrahim Akhdar',
         album:'Juz 30 + Al-Fatihah'
       });
-      navigator.mediaSession.playbackState='playing';
-      navigator.mediaSession.setActionHandler('play',()=>juzCurAudio&&juzCurAudio.play());
-      navigator.mediaSession.setActionHandler('pause',()=>juzCurAudio&&juzCurAudio.pause());
+      navigator.mediaSession.playbackState=juzPlayState.paused?'paused':'playing';
+      navigator.mediaSession.setActionHandler('play',resumeJuzPlay);
+      navigator.mediaSession.setActionHandler('pause',pauseJuzPlay);
       navigator.mediaSession.setActionHandler('stop',()=>stopJuzPlayAll());
       navigator.mediaSession.setActionHandler('nexttrack',()=>{
         if(!juzPlayState)return;
@@ -1568,10 +1613,6 @@ function juzPlayStep(){
       });
     }
 
-    juzCurAudio.play().catch(()=>{
-      setMsg('⚠ Audio requires internet · check connection');
-      stopJuzPlayAll();
-    });
     juzCurAudio.onended=()=>{
       if(juzCurCard)juzCurCard.classList.remove('playing');
       juzCurAudio=null;juzCurCard=null;
@@ -1579,6 +1620,12 @@ function juzPlayStep(){
       juzPlayState.index++;
       juzPlayStep();
     };
+
+    if(juzPlayState.paused)return; // audio is loaded and ready; Resume will start it
+    juzCurAudio.play().catch(()=>{
+      setMsg('⚠ Audio requires internet · check connection');
+      stopJuzPlayAll();
+    });
   };
 
   // Every surah except Al-Fatihah must be preceded by the Bismillah
@@ -1629,18 +1676,19 @@ function playJuzBismillah(s,callback){
       artist:'Sheikh Ibrahim Akhdar',
       album:'Juz 30 + Al-Fatihah'
     });
-    navigator.mediaSession.playbackState='playing';
+    navigator.mediaSession.playbackState=juzPlayState.paused?'paused':'playing';
   }
-  juzCurAudio.play().catch(()=>{
-    setMsg('⚠ Audio requires internet · check connection');
-    stopJuzPlayAll();
-  });
   juzCurAudio.onended=()=>{
     if(juzCurBismEl){juzCurBismEl.classList.remove('playing');juzCurBismEl=null;}
     juzCurAudio=null;
     if(!juzPlayState||juzPlayState.cancelled)return;
     callback();
   };
+  if(juzPlayState.paused)return; // audio is loaded and ready; Resume will start it
+  juzCurAudio.play().catch(()=>{
+    setMsg('⚠ Audio requires internet · check connection');
+    stopJuzPlayAll();
+  });
 }
 
 
